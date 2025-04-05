@@ -23,4 +23,11 @@ No terminal do Windows (PowerShell ou CMD), digite:
 
 ```bash
 wsl --install
- 
+
+### 2. Instalar a extensão Remote - WSL no VS Code
+
+Abra o Visual Studio Code
+
+Vá até a aba de Extensões (Ctrl + Shift + X)
+
+Busque por Remote - WSL e clique em Instalar
