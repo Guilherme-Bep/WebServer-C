@@ -11,7 +11,6 @@
  - Bind do socket com a interface de rede
  - Receber conexões
  - loop para conexões
-
 */
 
 #include <stdio.h>
