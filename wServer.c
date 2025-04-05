@@ -14,81 +14,142 @@
 
 */
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <time.h>
 
 #define PORT 8080
-#define MAX 1024 // tamanho máximo do buffer de dados
+#define BUFFER_SIZE 4096
+#define MAX_CONNECTIONS 10
+#define DEFAULT_FILE "index.html"
 
-int main () {
-    int server_fd, client_fd; // file descriptor do servidor e do cliente
+// Função para enviar resposta HTTP 404
+void send_404(int client_fd) {
+    const char *response = "HTTP/1.1 404 Not Found\r\n"
+                          "Content-Type: text/html\r\n"
+                          "Connection: close\r\n\r\n"
+                          "<html><body><h1>404 Not Found</h1></body></html>";
+    write(client_fd, response, strlen(response));
+}
 
-    struct sockaddr_in address;
-
-    int addrlen = sizeof(address); // tamanho da estrutura de endereço
-
-
-    char buffer[MAX] = {0}; // buffer para armazenar os dados recebidos
-
-    const char* html_body = "<html><head><title>Web Server C</title></head></html>"; // corpo da resposta HTML
-                                "<body> <h1>Hello World!</h1><p>Esta pagina web está hospedada em um servidor em C</p></body></html>"; // corpo da resposta HTML
-
-
-    char html_response[MAX]; // buffer para armazenar a resposta HTML
-    snprintf(html_response, sizeof(html_response), 
-    "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/html\r\n"
-             "Content-Length: %d\r\n"
-             "\r\n%s", (int)strlen(html_body), html_body); // formata a resposta HTTP com o corpo HTML
-
-
-    server_df = socket(AF_INET, SOCK_STREAM, 0); // cria o socket TCP IP
-
-    if (server_fd == 0) { // verifica se o socket foi criado com sucesso
-        perror("Erro ao tentar cirar um socket!"); // imprime mensagem de erro
-        exit(EXIT_FAILURE); // fecha o programa
-
-            }
-
-    int opt = 1; // define a opção de reutilização do endereço
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)); // define as opções do socket para reutilizar o endereço
-
-    address.sin_family = AF_INET; // define a família de endereços como IPv4
-    address.sin_addr.s_addr = INADDR_ANY; // define o endereço IP como qualquer endereço disponível
-    address.sin_port = htons(MAX); // define a porta do servidor
-
-
-    bind(server_fd, (struct sockaddr*)&address, sizeof(address)); // vincula o socket ao endereço e porta definidos
-
-
-    listen(server_fd, 3); // coloca o socket em modo de escuta, com backlog de 3 conexões pendentes
-
-    printf("Servidor ouvindo na porta %d\n", MAX); // imprime mensagem de que o servidor está ouvindo na porta definida
-    
-    while (1) {
-        cliente_fd = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen); // aceita uma conexão do cliente
-
-        int byteCount read(client_fd, buffer, sizeof(buffer)); // lê os dados recebidos do cliente
-
-        if (byteCount < 0) {
-           printf("Erro ao ler os dados do cliente\n"); // imprime mensagem de erro
-            close(client_fd); // fecha o socket do cliente
-            continue; // continua para a próxima iteração do loop 
-
-        }
-
-        write(client_fd, html_response, strlen(html_response)); // envia a resposta HTML para o cliente
-        printf("Resposta enviada para o cliente\n"); // imprime mensagem de que a resposta foi enviada
-
-
+// Função para enviar arquivo solicitado
+void send_file(int client_fd, const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        send_404(client_fd);
+        return;
     }
 
+    // Determinar tamanho do arquivo
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
 
-    closer(server_fd); // fecha o socket do servidor
+    // Ler conteúdo do arquivo
+    char *file_content = malloc(file_size + 1);
+    fread(file_content, 1, file_size, file);
+    fclose(file);
 
+    // Construir cabeçalho HTTP
+    char header[BUFFER_SIZE];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: text/html\r\n"
+             "Content-Length: %ld\r\n"
+             "Connection: keep-alive\r\n\r\n",
+             file_size);
+
+    // Enviar cabeçalho e conteúdo
+    write(client_fd, header, strlen(header));
+    write(client_fd, file_content, file_size);
+    free(file_content);
+}
+
+// Função para processar requisições
+void handle_request(int client_fd, char *buffer) {
+    // Extrair o método HTTP e o caminho solicitado
+    char method[16], path[256];
+    sscanf(buffer, "%s %s", method, path);
+
+    // Log da requisição
+    time_t now;
+    time(&now);
+    printf("[%.24s] %s %s\n", ctime(&now), method, path);
+
+    // Servir arquivo padrão se for requisição para raiz
+    if (strcmp(path, "/") == 0) {
+        send_file(client_fd, DEFAULT_FILE);
+    } else {
+        // Remover a barra inicial para obter o nome do arquivo
+        send_file(client_fd, path + 1);
+    }
+}
+
+int main() {
+    int server_fd, client_fd;
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+    char buffer[BUFFER_SIZE] = {0};
+
+    // Criar socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Erro ao criar socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // Configurar opções do socket
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        perror("Erro ao configurar opções do socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // Configurar endereço
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);  // Corrigido: estava usando MAX anteriormente
+
+    // Vincular socket ao endereço
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Erro ao vincular socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // Escutar por conexões
+    if (listen(server_fd, MAX_CONNECTIONS) < 0) {
+        perror("Erro ao escutar por conexões");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Servidor web rodando na porta %d\n", PORT);
+
+    while (1) {
+        // Aceitar nova conexão
+        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+            perror("Erro ao aceitar conexão");
+            continue;
+        }
+
+        // Ler requisição do cliente
+        int bytes_read = read(client_fd, buffer, BUFFER_SIZE);
+        if (bytes_read < 0) {
+            perror("Erro ao ler requisição");
+            close(client_fd);
+            continue;
+        }
+
+        // Processar requisição
+        handle_request(client_fd, buffer);
+
+        // Fechar conexão com o cliente
+        close(client_fd);
+    }
+
+    // Fechar socket do servidor (nunca alcançado neste loop infinito)
+    close(server_fd);
     return 0;
 }
