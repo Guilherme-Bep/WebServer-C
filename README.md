@@ -33,9 +33,33 @@ Vá até a aba de Extensões (Ctrl + Shift + X)
 
 Busque por Remote - WSL e clique em Instalar
 
-### Acesse a pasta do projeto via WSL
+### 3. Acesse a pasta do projeto via WSL
 
 ```bash
 exemplo: cd "/mnt/c/Users/usuario/Documents/WebServer"
 ```
+### 4. Abrir o projeto no VS Code com o WSL
+```bash
+code .
+```
+### 5. Instalar o GCC (se for a primeira vez compilando em C no WSL)
+```bash
+sudo apt update
+sudo apt install build-essential
+```
+### 6. Compile e rode o código
+```bash
+gcc wServer.c -o wServer
+./servidor
+```
+
+Aparecerá  "Servidor ouvindo na porta 8080"
+
+### 7. Abra o navegador e acesse:
+```bash
+http://localhost:8080
+```
+
+### 🤝 Contribuições
+Sinta-se à vontade para abrir issues, sugerir melhorias ou enviar pull requests. Qualquer feedback é bem-vindo!
 
