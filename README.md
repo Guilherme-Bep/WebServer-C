@@ -32,3 +32,10 @@ Abra o Visual Studio Code
 Vá até a aba de Extensões (Ctrl + Shift + X)
 
 Busque por Remote - WSL e clique em Instalar
+
+### Acesse a pasta do projeto via WSL
+
+```bash
+exemplo: cd "/mnt/c/Users/usuario/Documents/WebServer"
+```
+
