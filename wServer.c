@@ -1,24 +1,10 @@
-// Web server para hospedar aplicação em html, css e javascript
-
-//Estrutura básica do servidor
-
-/*
- - Criar as variáveis
- - Inicializar as variáveis
- - Criar o socket
- - Abrir o socket
- - Criar o bind
- - Bind do socket com a interface de rede
- - Receber conexões
- - loop para conexões
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #define PORT 8080
@@ -35,56 +21,72 @@ void send_404(int client_fd) {
     write(client_fd, response, strlen(response));
 }
 
+// Função para detectar tipo MIME
+const char* get_mime_type(const char* filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot) return "text/plain";
+    
+    if (strcmp(dot, ".css") == 0) return "text/css";
+    if (strcmp(dot, ".js") == 0) return "application/javascript";
+    if (strcmp(dot, ".html") == 0) return "text/html";
+    if (strcmp(dot, ".jpg") == 0) return "image/jpeg";
+    if (strcmp(dot, ".png") == 0) return "image/png";
+    if (strcmp(dot, ".ico") == 0) return "image/x-icon";
+    return "text/plain";
+}
+
 // Função para enviar arquivo solicitado
 void send_file(int client_fd, const char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (file == NULL) {
+    struct stat file_stat;
+    
+    // Verificar se o arquivo existe e não é diretório
+    if (stat(filename, &file_stat) == -1 || S_ISDIR(file_stat.st_mode)) {
         send_404(client_fd);
         return;
     }
 
-    // Determinar tamanho do arquivo
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        send_404(client_fd);
+        return;
+    }
 
-    // Ler conteúdo do arquivo
-    char *file_content = malloc(file_size + 1);
-    fread(file_content, 1, file_size, file);
-    fclose(file);
-
-    // Construir cabeçalho HTTP
-    char header[BUFFER_SIZE];
-    snprintf(header, sizeof(header),
+    // Configurar cabeçalhos
+    const char *mime_type = get_mime_type(filename);
+    char headers[BUFFER_SIZE];
+    snprintf(headers, sizeof(headers),
              "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/html\r\n"
+             "Content-Type: %s\r\n"
              "Content-Length: %ld\r\n"
-             "Connection: keep-alive\r\n\r\n",
-             file_size);
+             "Connection: close\r\n\r\n",
+             mime_type, file_stat.st_size);
 
-    // Enviar cabeçalho e conteúdo
-    write(client_fd, header, strlen(header));
-    write(client_fd, file_content, file_size);
-    free(file_content);
+    write(client_fd, headers, strlen(headers));
+
+    // Enviar conteúdo do arquivo em blocos
+    char buffer[BUFFER_SIZE];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        write(client_fd, buffer, bytes_read);
+    }
+    
+    fclose(file);
 }
 
 // Função para processar requisições
 void handle_request(int client_fd, char *buffer) {
-    // Extrair o método HTTP e o caminho solicitado
     char method[16], path[256];
     sscanf(buffer, "%s %s", method, path);
 
-    // Log da requisição
-    time_t now;
-    time(&now);
+    // Log de acesso
+    time_t now = time(NULL);
     printf("[%.24s] %s %s\n", ctime(&now), method, path);
 
-    // Servir arquivo padrão se for requisição para raiz
+    // Servir arquivos
     if (strcmp(path, "/") == 0) {
         send_file(client_fd, DEFAULT_FILE);
     } else {
-        // Remover a barra inicial para obter o nome do arquivo
-        send_file(client_fd, path + 1);
+        send_file(client_fd, path + 1); // Remove a barra inicial
     }
 }
 
@@ -92,9 +94,8 @@ int main() {
     int server_fd, client_fd;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
-    char buffer[BUFFER_SIZE] = {0};
 
-    // Criar socket
+    // Configurar socket
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("Erro ao criar socket");
         exit(EXIT_FAILURE);
@@ -102,53 +103,42 @@ int main() {
 
     // Configurar opções do socket
     int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("Erro ao configurar opções do socket");
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("Erro nas opções do socket");
         exit(EXIT_FAILURE);
     }
 
-    // Configurar endereço
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);  // Corrigido: estava usando MAX anteriormente
+    address.sin_port = htons(PORT);
 
-    // Vincular socket ao endereço
+    // Vincular e escutar
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Erro ao vincular socket");
+        perror("Erro no bind");
         exit(EXIT_FAILURE);
     }
 
-    // Escutar por conexões
     if (listen(server_fd, MAX_CONNECTIONS) < 0) {
-        perror("Erro ao escutar por conexões");
+        perror("Erro ao escutar");
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor web rodando na porta %d\n", PORT);
+    printf("Servidor rodando em http://localhost:%d\n", PORT);
 
+    // Loop principal
     while (1) {
-        // Aceitar nova conexão
         if ((client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
             perror("Erro ao aceitar conexão");
             continue;
         }
 
-        // Ler requisição do cliente
-        int bytes_read = read(client_fd, buffer, BUFFER_SIZE);
-        if (bytes_read < 0) {
-            perror("Erro ao ler requisição");
-            close(client_fd);
-            continue;
-        }
-
-        // Processar requisição
+        char buffer[BUFFER_SIZE] = {0};
+        read(client_fd, buffer, BUFFER_SIZE);
+        
         handle_request(client_fd, buffer);
-
-        // Fechar conexão com o cliente
         close(client_fd);
     }
 
-    // Fechar socket do servidor (nunca alcançado neste loop infinito)
     close(server_fd);
     return 0;
 }
